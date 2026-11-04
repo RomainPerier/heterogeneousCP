@@ -9,6 +9,16 @@ e_calibrator <- function(x,s,alpha,hs){
  }
 }
 
+e_calibrator_DBY <- function(x,s,alpha,hm,m){
+  if (hm*x*s/m<=alpha){
+    return(s/(alpha*(ceiling(s*hm*x/alpha))))
+  }
+  else{
+    return(0)
+  }
+}
+
+
 # BY procedure ----------------
 
 BY_vanilla <- function(pvals,alpha){
@@ -43,6 +53,13 @@ get.local.evalues.subset <- function(pvalues, list_cdf, alpha, i, m, subset_of_h
       return(list(subset_of_hyp = subset_of_hyp, evalue_HBY = evalue_HBY, evalue_CBY = evalue_CBY, evalue_DBY = evalue_DBY))
       }
 
+get.local.evalues.subset.DBY <- function(pvalues, list_cdf, alpha, i, m, subset_of_hyp,vect_local_evalue,hs_vect){
+  cpvalues <- compute.heterogeneous.compound.pvalues(pvalues[subset_of_hyp],list_cdf[subset_of_hyp])
+  evalue_DBY <- 1/i * sum(cevalues_from_cpvalues(cpvalues,m,alpha*m/i,hs_vect[m]))
+  return(list(subset_of_hyp = subset_of_hyp, evalue_DBY = evalue_DBY))
+}
+
+
 # --- generate the list of compound evalues for all subsets of hypotheses. It gives a list of two elements: 
 # the first codes the subsets, the second codes the local evalues 
 # each is a list of list such that the i-th element corresponds to the subsets of size i. --------------------------
@@ -59,6 +76,20 @@ get.local.evalues <- function(pvalues, list_cdf, alpha, m){
   }
   return(list_of_evalues)
 }
+
+get.local.evalues.DBY <- function(pvalues, list_cdf, alpha, m){
+  hs_vect <- cumsum(1/(1:m))
+  list_of_evalues <- list()
+  for (i in 1:m){
+    vect_local_evalue <- sapply(pvalues, function(x){e_calibrator(x,i,alpha,hs_vect[i])})
+    list_of_subsets <- combn(1:m,i,simplify = FALSE)
+    list_of_evalues[[i]] <- lapply(list_of_subsets,function(subset_of_hyp){
+    get.local.evalues.subset.DBY(pvalues, list_cdf, alpha, i, m, subset_of_hyp,vect_local_evalue,hs_vect)
+    })
+  }
+  return(list_of_evalues)
+}
+
 
 # Auxiliary function that compute worst case compound pvalues for each value of a and b --------------------
 compute_f_wc_aux_matrix <-  function(p,R, Rc, list_cdf){
@@ -149,10 +180,10 @@ is_in_closure_set <-function(pvals,R, alpha,list_cdf){
           )
         }
       }
-      if (wc_evalue_HBY*alpha < (a/k)){
+      if (wc_evalue_HBY*alpha < (a/k) && !isTRUE(all.equal(wc_evalue_HBY*alpha,a/k))){
         is_in_cHBY <- FALSE
       }
-      if (wc_evalue_DBY*alpha < (a/k)){
+      if (wc_evalue_DBY*alpha < (a/k) && !isTRUE(all.equal(wc_evalue_DBY*alpha,a/k))){
         is_in_cDBY <- FALSE
       }
       b <- b+1
@@ -164,11 +195,13 @@ is_in_closure_set <-function(pvals,R, alpha,list_cdf){
 
 # Function that compute the bigger top-k set (for the superset relation) that belong to the heterogeneous closed sets -----------
 
-nb_rejected_hyp <- function(pvals, alpha, list_cdf){
+nb_rejected_hyp <- function(pvals, alpha, list_cdf,H0 = NULL){
   m <- length(pvals)
   order_pvals <- order(pvals)
   nb_rejected_hyp_cHBY <- 0
   nb_rejected_hyp_cDBY <- 0
+  FDP_SC_cHBY <- 0
+  FDP_SC_cDBY <- 0
   for (i in 1:m){
     result <- is_in_closure_set(pvals,order_pvals[1:i], alpha,list_cdf)
     if (result$is_in_cHBY){
@@ -178,6 +211,23 @@ nb_rejected_hyp <- function(pvals, alpha, list_cdf){
       nb_rejected_hyp_cDBY <- i 
     }
   }
-  return(list(length_set_SC_cHBY = nb_rejected_hyp_cHBY, length_set_SC_cDBY = nb_rejected_hyp_cDBY))
+  if (!is.null(H0)){
+    if (nb_rejected_hyp_cHBY>0){
+      nb_fp <- length(intersect(order_pvals[1:nb_rejected_hyp_cHBY],H0))
+      if(nb_fp>0){
+        FDP_SC_cHBY <- nb_fp/nb_rejected_hyp_cHBY
+      }
+    }
+    if (nb_rejected_hyp_cDBY>0){
+      nb_fp <- length(intersect(order_pvals[1:nb_rejected_hyp_cDBY],H0))
+      if(nb_fp>0){
+        FDP_SC_cDBY <- nb_fp/nb_rejected_hyp_cDBY
+      }
+    }
+    return(list(length_set_SC_cHBY = nb_rejected_hyp_cHBY, length_set_SC_cDBY = nb_rejected_hyp_cDBY, FDP_SC_cHBY = FDP_SC_cHBY, FDP_SC_cDBY = FDP_SC_cDBY))
+  }
+  else{
+    return(list(length_set_SC_cHBY = nb_rejected_hyp_cHBY, length_set_SC_cDBY = nb_rejected_hyp_cDBY))
+  }
 }
 
